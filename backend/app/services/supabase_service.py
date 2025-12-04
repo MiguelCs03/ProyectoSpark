@@ -19,7 +19,7 @@ class SupabaseService:
         )
         self.table_name = "locations"  # Tabla de ubicaciones/señales
     
-    def get_all_signals(self, limit: int = 1000) -> List[Dict[str, Any]]:
+    def get_all_signals(self, limit: int = 60000) -> List[Dict[str, Any]]:
         """Obtiene todas las señales con límite."""
         try:
             response = self.client.table(self.table_name)\
@@ -80,7 +80,7 @@ class SupabaseService:
             if filters.get("signal_min"):
                 query = query.gte("signal", filters["signal_min"])
             
-            response = query.limit(5000).execute()
+            response = query.limit(60000).execute()
             return self._normalize_data(response.data)
         except Exception as e:
             logger.error(f"Error fetching filtered signals: {e}")
@@ -95,6 +95,18 @@ class SupabaseService:
                 .subscribe()
         except Exception as e:
             logger.error(f"Error subscribing to changes: {e}")
+
+    def get_total_count(self) -> int:
+        """Obtiene el conteo total exacto de registros en la tabla."""
+        try:
+            # count='exact', head=True hace un SELECT COUNT(*) rápido sin traer datos
+            response = self.client.table(self.table_name)\
+                .select("*", count="exact", head=True)\
+                .execute()
+            return response.count
+        except Exception as e:
+            logger.error(f"Error getting total count: {e}")
+            return 0
     
     def get_unique_values(self, column: str) -> List[str]:
         """Obtiene valores únicos de una columna para filtros."""

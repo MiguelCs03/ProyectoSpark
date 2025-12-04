@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("/signals")
 async def get_signals(
-    limit: int = Query(1000, description="Límite de registros"),
+    limit: int = Query(60000, description="Límite de registros"),
     provincia: Optional[str] = None,
     municipio: Optional[str] = None,
     empresa: Optional[str] = None,
@@ -88,6 +88,13 @@ async def get_aggregated_data(filters: FilterParams):
         by_type = spark_etl_service.aggregate_by_signal_type(df)
         by_geography = spark_etl_service.aggregate_by_geography(df)
         
+        # Si no hay filtros, usar el conteo total real de la base de datos
+        # Esto permite mostrar "600,000" señales aunque solo procesemos una muestra
+        if not filter_dict:
+            real_total = supabase_service.get_total_count()
+            if real_total > 0:
+                stats["total_signals"] = real_total
+        
         return {
             "success": True,
             "total_signals": stats["total_signals"],
@@ -104,7 +111,7 @@ async def get_aggregated_data(filters: FilterParams):
 
 @router.get("/map/points")
 async def get_map_points(
-    limit: int = Query(5000, description="Límite de puntos en el mapa"),
+    limit: int = Query(60000, description="Límite de puntos en el mapa"),
     provincia: Optional[str] = None,
     municipio: Optional[str] = None
 ):

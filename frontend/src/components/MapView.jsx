@@ -2,8 +2,8 @@
  * Map Component - Mapa interactivo con Leaflet
  * Visualiza puntos de señales en Santa Cruz
  */
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
+import { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // Configuración del mapa centrado en Santa Cruz, Bolivia
@@ -36,6 +36,16 @@ function MapBounds({ points }) {
 }
 
 export default function MapView({ points = [], selectedFilters }) {
+    const [districtsData, setDistrictsData] = useState(null);
+
+    // Cargar datos de distritos
+    useEffect(() => {
+        fetch('/santa-cruz-districts.geojson')
+            .then(response => response.json())
+            .then(data => setDistrictsData(data))
+            .catch(error => console.error('Error loading districts:', error));
+    }, []);
+
     const getMarkerColor = (tipoSenal) => {
         return SIGNAL_COLORS[tipoSenal] || SIGNAL_COLORS.default;
     };
@@ -45,6 +55,116 @@ export default function MapView({ points = [], selectedFilters }) {
         if (nivelBateria >= 80) return 8;
         if (nivelBateria >= 50) return 6;
         return 4;
+    };
+
+    // Paleta de colores para provincias
+    const PROVINCE_COLORS = {
+        'Andres Ibañez': '#ef4444',
+        'Warnes': '#f97316',
+        'Ichilo': '#eab308',
+        'Sara': '#84cc16',
+        'Obispo Santistevan': '#06b6d4',
+        'Chiquitos': '#3b82f6',
+        'Cordillera': '#8b5cf6',
+        'Vallegrande': '#d946ef',
+        'Florida': '#f43f5e',
+        'default': '#6b7280'
+    };
+
+    const getProvinceColor = (provincia) => {
+        return PROVINCE_COLORS[provincia] || PROVINCE_COLORS.default;
+    };
+
+    // Estilo dinámico según la capa seleccionada
+    const getGeoStyle = (feature) => {
+        const layerType = selectedFilters?.layer || 'none';
+
+        if (layerType === 'provincias') {
+            return {
+                fillColor: getProvinceColor(feature.properties.provincia),
+                fillOpacity: 0.4,
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                dashArray: ''
+            };
+        }
+
+        if (layerType === 'distritos') {
+            return {
+                fillColor: '#3b82f6',
+                fillOpacity: 0.1,
+                color: '#22c55e', // Verde brillante para líneas
+                weight: 3,        // Líneas más gruesas
+                opacity: 0.8,
+                dashArray: '5, 5'
+            };
+        }
+
+        if (layerType === 'zonas') {
+            // Simulación de zonas usando distritos con otro estilo
+            return {
+                fillColor: '#8b5cf6',
+                fillOpacity: 0.2,
+                color: '#d946ef',
+                weight: 2,
+                opacity: 0.8,
+                dashArray: '2, 4'
+            };
+        }
+
+        return { opacity: 0, fillOpacity: 0 }; // Ocultar si es 'none'
+    };
+
+    // Highlight al pasar el mouse
+    const highlightFeature = (e) => {
+        const layer = e.target;
+        layer.setStyle({
+            fillOpacity: 0.5,
+            weight: 4,
+            opacity: 1,
+            color: '#fbbf24' // Amarillo al resaltar
+        });
+        layer.bringToFront();
+    };
+
+    const resetHighlight = (e) => {
+        const layer = e.target;
+        // Restaurar estilo original
+        if (selectedFilters?.layer && selectedFilters.layer !== 'none') {
+            // Necesitamos pasar el feature para obtener el estilo correcto (especialmente para provincias)
+            const style = getGeoStyle(e.target.feature);
+            layer.setStyle(style);
+        }
+    };
+
+    // Filtrar features según capa (opcional, por ahora mostramos todo el geojson con diferentes estilos)
+    const shouldShowLayer = selectedFilters?.layer && selectedFilters.layer !== 'none';
+
+    const onEachDistrict = (feature, layer) => {
+        const { distrito, nombreciud, poblacion, viviendas } = feature.properties;
+
+        layer.bindPopup(`
+            <div style="font-family: sans-serif;">
+                <h3 style="margin: 0 0 8px 0; color: #22c55e; font-size: 14px; font-weight: 600;">
+                    ${nombreciud}
+                </h3>
+                <p style="margin: 4px 0; color: #333; font-size: 12px;">
+                    <strong>Distrito:</strong> ${distrito}
+                </p>
+                <p style="margin: 4px 0; color: #333; font-size: 12px;">
+                    <strong>Población:</strong> ${parseInt(poblacion).toLocaleString()}
+                </p>
+                <p style="margin: 4px 0; color: #333; font-size: 12px;">
+                    <strong>Viviendas:</strong> ${parseInt(viviendas).toLocaleString()}
+                </p>
+            </div>
+        `);
+
+        layer.on({
+            mouseover: highlightFeature,
+            mouseout: resetHighlight,
+        });
     };
 
     return (
@@ -59,6 +179,16 @@ export default function MapView({ points = [], selectedFilters }) {
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
+
+                {/* Capa de distritos/provincias/zonas */}
+                {districtsData && shouldShowLayer && (
+                    <GeoJSON
+                        key={selectedFilters?.layer} // Forzar re-render al cambiar capa
+                        data={districtsData}
+                        style={getGeoStyle}
+                        onEachFeature={onEachDistrict}
+                    />
+                )}
 
                 {points.length > 0 && <MapBounds points={points} />}
 
@@ -113,6 +243,12 @@ export default function MapView({ points = [], selectedFilters }) {
                         <span>{type}</span>
                     </div>
                 ))}
+                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '20px', height: '2px', background: '#22c55e' }}></div>
+                        <span>Distritos</span>
+                    </div>
+                </div>
             </div>
         </div>
     );

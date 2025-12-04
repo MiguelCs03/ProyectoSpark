@@ -51,7 +51,53 @@ export default function FilterSidebar({
 
     return (
         <div className="sidebar">
-            <h2>Filtros</h2>
+            <h2>Panel de Control</h2>
+
+            {/* Divisiones Geográficas */}
+            <div className="filter-group">
+                <h3>🗺️ Divisiones Geográficas</h3>
+                <div className="filter-options">
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="layer-none"
+                            name="geo-layer"
+                            defaultChecked
+                            onChange={() => onFilterChange({ ...localFilters, layer: 'none' })}
+                        />
+                        <label htmlFor="layer-none">Ninguna</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="layer-distritos"
+                            name="geo-layer"
+                            onChange={() => onFilterChange({ ...localFilters, layer: 'distritos' })}
+                        />
+                        <label htmlFor="layer-distritos">Distritos</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="layer-provincias"
+                            name="geo-layer"
+                            onChange={() => onFilterChange({ ...localFilters, layer: 'provincias' })}
+                        />
+                        <label htmlFor="layer-provincias">Provincias</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="layer-zonas"
+                            name="geo-layer"
+                            onChange={() => onFilterChange({ ...localFilters, layer: 'zonas' })}
+                        />
+                        <label htmlFor="layer-zonas">Zonas</label>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style={{ marginTop: '20px' }}>Filtros de Datos</h3>
 
             {/* Provincias */}
             <div className="filter-group">

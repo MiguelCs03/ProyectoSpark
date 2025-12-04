@@ -130,7 +130,7 @@ class SparkETLService:
         
         return filtered_df
     
-    def get_geographic_points(self, df: DataFrame, limit: int = 5000) -> List[Dict[str, Any]]:
+    def get_geographic_points(self, df: DataFrame, limit: int = 60000) -> List[Dict[str, Any]]:
         """Obtiene puntos geográficos para visualización en mapa."""
         points = df.select(
             "latitude", "longitude", "network_type", "sim_operator", 
