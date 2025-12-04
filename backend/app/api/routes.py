@@ -2,15 +2,47 @@
 Endpoints REST de la API.
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
 from app.models.signal import FilterParams, AggregatedData
 from app.services.supabase_service import supabase_service
 from app.etl.spark_pipeline import spark_etl_service
 import logging
+import hashlib
+import json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Caché simple en memoria
+_cache: Dict[str, tuple[Any, datetime]] = {}
+CACHE_TTL = timedelta(seconds=30)  # 30 segundos de caché
+
+
+def get_cache_key(filters: dict) -> str:
+    """Generate cache key from filters"""
+    filter_str = json.dumps(filters, sort_keys=True)
+    return hashlib.md5(filter_str.encode()).hexdigest()
+
+
+def get_from_cache(key: str) -> Optional[Any]:
+    """Get data from cache if not expired"""
+    if key in _cache:
+        data, timestamp = _cache[key]
+        if datetime.now() - timestamp < CACHE_TTL:
+            logger.info(f"✓ Cache HIT for key: {key[:8]}...")
+            return data
+        else:
+            # Expired, remove from cache
+            del _cache[key]
+            logger.info(f"✗ Cache EXPIRED for key: {key[:8]}...")
+    return None
+
+
+def save_to_cache(key: str, data: Any):
+    """Save data to cache"""
+    _cache[key] = (data, datetime.now())
+    logger.info(f"✓ Saved to cache: {key[:8]}... (cache size: {len(_cache)})")
 
 
 @router.get("/signals")
@@ -55,10 +87,22 @@ async def get_signals(
 async def get_aggregated_data(filters: FilterParams):
     """
     Procesa y agrega datos usando Spark ETL.
+    Con caché para evitar procesamiento redundante.
     """
     try:
         # Obtener datos de Supabase
         filter_dict = {k: v for k, v in filters.dict().items() if v is not None}
+        
+        # Generar clave de caché
+        cache_key = get_cache_key(filter_dict)
+        
+        # Intentar obtener de caché
+        cached_result = get_from_cache(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
+        # Si no está en caché, procesar
+        logger.info(f"✗ Cache MISS - Processing data for key: {cache_key[:8]}...")
         
         if filter_dict:
             raw_data = supabase_service.get_signals_with_filters(filter_dict)
@@ -100,7 +144,7 @@ async def get_aggregated_data(filters: FilterParams):
             if real_total > 0:
                 stats["total_signals"] = real_total
         
-        return {
+        result = {
             "success": True,
             "total_signals": stats["total_signals"],
             "average_battery": stats["average_battery"],
@@ -114,6 +158,11 @@ async def get_aggregated_data(filters: FilterParams):
             "coverage_analysis": coverage_analysis,
             "district_analysis": district_analysis
         }
+        
+        # Guardar en caché
+        save_to_cache(cache_key, result)
+        
+        return result
     except Exception as e:
         logger.error(f"Error in get_aggregated_data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
