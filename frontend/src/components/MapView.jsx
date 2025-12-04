@@ -2,9 +2,10 @@
  * Map Component - Mapa interactivo con Leaflet
  * Visualiza puntos de señales en Santa Cruz
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'react-leaflet';
 import HeatmapLayer from './HeatmapLayer';
+import ClusterLayer from './ClusterLayer';
 import 'leaflet/dist/leaflet.css';
 
 // Configuración del mapa centrado en Santa Cruz, Bolivia
@@ -23,13 +24,35 @@ const SIGNAL_COLORS = {
 // Componente para ajustar vista del mapa
 function MapBounds({ points }) {
     const map = useMap();
+    const hasFittedRef = useRef(false);
 
     useEffect(() => {
+        // Solo ajustar vista si hay puntos y no se ha ajustado antes (o si los puntos se reiniciaron)
         if (points && points.length > 0) {
-            const bounds = points.map(p => [p.lat, p.lng]);
-            if (bounds.length > 0) {
-                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+            // Si es la primera carga significativa (ej. > 0 puntos), ajustamos
+            // Pero si estamos cargando incrementalmente, no queremos reajustar cada 5 segundos
+            
+            // Estrategia: Ajustar solo si no hemos ajustado, o si los puntos cambiaron drásticamente (filtro nuevo)
+            // Como detectamos filtro nuevo? points.length suele bajar a 0 o cambiar mucho.
+            // Pero aquí points crece.
+            
+            if (!hasFittedRef.current) {
+                const bounds = points
+                    .map(p => {
+                        const lat = p.latitude || p.lat;
+                        const lng = p.longitude || p.lng;
+                        return (lat && lng) ? [lat, lng] : null;
+                    })
+                    .filter(b => b !== null);
+                    
+                if (bounds.length > 0) {
+                    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+                    hasFittedRef.current = true;
+                }
             }
+        } else if (points && points.length === 0) {
+            // Resetear flag si los puntos se limpian (cambio de filtro)
+            hasFittedRef.current = false;
         }
     }, [points, map]);
 
@@ -39,6 +62,7 @@ function MapBounds({ points }) {
 export default function MapView({ points = [], selectedFilters, heatmapData = [] }) {
     const [districtsData, setDistrictsData] = useState(null);
     const [provincesData, setProvincesData] = useState(null);
+    const [municipiosData, setMunicipiosData] = useState(null);
     const [showHeatmap, setShowHeatmap] = useState(true);
     const [heatmapMetric, setHeatmapMetric] = useState('signal'); // 'signal' or 'speed'
 
@@ -54,6 +78,12 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
             .then(response => response.json())
             .then(data => setProvincesData(data))
             .catch(error => console.error('Error loading provinces:', error));
+
+        // Cargar datos de municipios
+        fetch('/santa_cruz_municipios.geojson')
+            .then(response => response.json())
+            .then(data => setMunicipiosData(data))
+            .catch(error => console.error('Error loading municipios:', error));
     }, []);
 
     // Función para obtener color basado en intensidad de señal (COLORES MÁS VIBRANTES)
@@ -129,6 +159,17 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
             };
         }
 
+        if (layerType === 'municipios') {
+            return {
+                fillColor: '#10b981', // Emerald 500
+                fillOpacity: 0.2,
+                color: '#059669', // Emerald 600
+                weight: 2,
+                opacity: 0.8,
+                dashArray: '4, 4'
+            };
+        }
+
         if (layerType === 'zonas') {
             // Simulación de zonas usando distritos con otro estilo
             return {
@@ -195,6 +236,29 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
         });
     };
 
+    const onEachMunicipio = (feature, layer) => {
+        const { municipal_id, intersects_with } = feature.properties;
+
+        layer.bindPopup(`
+            <div style="font-family: sans-serif;">
+                <h3 style="margin: 0 0 8px 0; color: #10b981; font-size: 14px; font-weight: 600;">
+                    Municipio
+                </h3>
+                <p style="margin: 4px 0; color: #333; font-size: 12px;">
+                    <strong>ID:</strong> ${municipal_id}
+                </p>
+                <p style="margin: 4px 0; color: #333; font-size: 12px;">
+                    <strong>Provincia:</strong> ${intersects_with}
+                </p>
+            </div>
+        `);
+
+        layer.on({
+            mouseover: highlightFeature,
+            mouseout: resetHighlight,
+        });
+    };
+
     return (
         <div className="map-container">
             <MapContainer
@@ -228,6 +292,15 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
                     />
                 )}
 
+                {shouldShowLayer && selectedFilters?.layer === 'municipios' && municipiosData && (
+                    <GeoJSON
+                        key="municipios"
+                        data={municipiosData}
+                        style={getGeoStyle}
+                        onEachFeature={onEachMunicipio}
+                    />
+                )}
+
                 {shouldShowLayer && selectedFilters?.layer === 'zonas' && districtsData && (
                     <GeoJSON
                         key="zones"
@@ -247,48 +320,10 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
 
                 {filteredPoints.length > 0 && <MapBounds points={filteredPoints} />}
 
-                {filteredPoints.map((point, index) => (
-                    <CircleMarker
-                        key={`marker-${index}`}
-                        center={[point.lat, point.lng]}
-                        radius={getMarkerSize(point.signal || -80)}
-                        fillColor={getSignalColor(point.signal || -80)}
-                        color="#fff"
-                        weight={1}
-                        opacity={0.9}
-                        fillOpacity={0.8}
-                    >
-                        <Popup>
-                            <div style={{ minWidth: '220px' }}>
-                                <h3 style={{
-                                    margin: '0 0 10px 0',
-                                    fontSize: '16px',
-                                    fontWeight: 'bold',
-                                    color: getSignalColor(point.signal || -80)
-                                }}>
-                                    📡 {point.sim_operator || 'Unknown'}
-                                </h3>
-                                <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                                    <p><strong>Tipo de Red:</strong> {point.network_type || 'N/A'}</p>
-                                    <p><strong>Dispositivo:</strong> {point.device_name || 'N/A'}</p>
-                                    <p style={{
-                                        color: getSignalColor(point.signal || -80),
-                                        fontWeight: 'bold'
-                                    }}>
-                                        <strong>Señal:</strong> {point.signal || 'N/A'} dBm
-                                    </p>
-                                    <p><strong>Batería:</strong> {point.battery || 'N/A'}%</p>
-                                    <p><strong>Velocidad:</strong> {point.speed ? point.speed.toFixed(2) : 'N/A'} m/s</p>
-                                    <p><strong>Coordenadas:</strong></p>
-                                    <p style={{ fontSize: '12px', color: '#666' }}>
-                                        Lat: {point.lat.toFixed(5)}<br />
-                                        Lng: {point.lng.toFixed(5)}
-                                    </p>
-                                </div>
-                            </div>
-                        </Popup>
-                    </CircleMarker>
-                ))}
+                {/* Capa de Clusters para puntos (Optimizado para 300k+) */}
+                {filteredPoints.length > 0 && (
+                    <ClusterLayer points={filteredPoints} />
+                )}
             </MapContainer>
 
             <div className="map-legend" style={{
@@ -342,12 +377,18 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
                     </div>
                 )}
 
-                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '20px', height: '2px', background: '#22c55e' }}></div>
-                        <span>Distritos</span>
+                {selectedFilters?.layer && selectedFilters.layer !== 'none' && (
+                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ 
+                                width: '20px', 
+                                height: '2px', 
+                                background: selectedFilters.layer === 'municipios' ? '#059669' : '#22c55e' 
+                            }}></div>
+                            <span style={{ textTransform: 'capitalize' }}>{selectedFilters.layer}</span>
+                        </div>
                     </div>
-                </div>
+                )}
 
                 {/* Controles de Mapa de Calor */}
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>

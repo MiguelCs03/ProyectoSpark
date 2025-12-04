@@ -27,8 +27,13 @@ export default function HeatmapLayer({ heatmapData, metric = 'signal' }) {
                 intensity = 0.5;
             }
 
-            return [point.lat, point.lng, intensity];
-        });
+            const lat = point.latitude || point.lat;
+            const lng = point.longitude || point.lng;
+
+            if (!lat || !lng) return null;
+
+            return [lat, lng, intensity];
+        }).filter(p => p !== null);
 
         // Crear capa de mapa de calor
         const heatLayer = L.heatLayer(heatData, {

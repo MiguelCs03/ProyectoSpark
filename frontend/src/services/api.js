@@ -10,7 +10,7 @@ class ApiService {
     constructor() {
         this.client = axios.create({
             baseURL: API_BASE_URL,
-            timeout: 120000,
+            timeout: 300000, // 5 minutos de timeout para grandes volúmenes de datos
             headers: {
                 'Content-Type': 'application/json'
             }
@@ -18,9 +18,12 @@ class ApiService {
     }
 
     // Obtener todas las señales
-    async getSignals(filters = {}) {
+    async getSignals(filters = {}, offset = 0, limit = 25000) {
         try {
             const params = new URLSearchParams();
+            params.append('offset', offset);
+            params.append('limit', limit);
+            
             Object.entries(filters).forEach(([key, value]) => {
                 if (value) params.append(key, value);
             });

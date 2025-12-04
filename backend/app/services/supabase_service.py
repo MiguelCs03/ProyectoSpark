@@ -19,15 +19,20 @@ class SupabaseService:
         )
         self.table_name = "locations"  # Tabla de ubicaciones/señales
     
-    def get_all_signals(self) -> List[Dict[str, Any]]:
-        """Obtiene TODAS las señales sin límite para análisis completo."""
+    def get_all_signals(self, limit: int = 300000, offset: int = 0) -> List[Dict[str, Any]]:
+        """Obtiene TODAS las señales con límite y offset configurables."""
         try:
-            # Sin límite - traer todos los datos para análisis completo
+            # Optimización: Seleccionar solo columnas necesarias y usar range para paginación
+            # Supabase range es inclusivo [start, end]
+            start = offset
+            end = offset + limit - 1
+            
             response = self.client.table(self.table_name)\
-                .select("*")\
+                .select("latitude,longitude,signal,sim_operator,network_type,device_name,speed,battery,altitude")\
+                .range(start, end)\
                 .execute()
-            logger.info(f"Fetched {len(response.data)} signals from database")
-            # Normalizar tipos de datos para Spark
+            
+            logger.info(f"Fetched {len(response.data)} signals from database (range={start}-{end})")
             return self._normalize_data(response.data)
         except Exception as e:
             logger.error(f"Error fetching signals: {e}")

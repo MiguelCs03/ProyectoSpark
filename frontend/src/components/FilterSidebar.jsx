@@ -88,6 +88,15 @@ export default function FilterSidebar({
                     <div className="filter-checkbox">
                         <input
                             type="radio"
+                            id="layer-municipios"
+                            name="geo-layer"
+                            onChange={() => onFilterChange({ ...localFilters, layer: 'municipios' })}
+                        />
+                        <label htmlFor="layer-municipios">Municipios</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
                             id="layer-zonas"
                             name="geo-layer"
                             onChange={() => onFilterChange({ ...localFilters, layer: 'zonas' })}

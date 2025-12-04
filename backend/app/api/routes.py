@@ -47,7 +47,8 @@ def save_to_cache(key: str, data: Any):
 
 @router.get("/signals")
 async def get_signals(
-    limit: int = Query(60000, description="Límite de registros"),
+    limit: int = Query(300000, description="Límite de registros"),
+    offset: int = Query(0, description="Desplazamiento de registros"),
     provincia: Optional[str] = None,
     municipio: Optional[str] = None,
     empresa: Optional[str] = None,
@@ -71,7 +72,7 @@ async def get_signals(
         if filters:
             data = supabase_service.get_signals_with_filters(filters)
         else:
-            data = supabase_service.get_all_signals(limit)
+            data = supabase_service.get_all_signals(limit, offset)
         
         return {
             "success": True,

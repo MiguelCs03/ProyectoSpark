@@ -3,7 +3,7 @@
  * Dashboard de análisis de señales de internet en Santa Cruz, Bolivia
  * Arquitectura: React + Spark ETL + Real-time WebSocket
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import MapView from './components/MapView';
 import FilterSidebar from './components/FilterSidebar';
 import StatsCards from './components/StatsCards';
@@ -25,9 +25,18 @@ function App() {
   });
   const [stats, setStats] = useState(null);
   const [mapPoints, setMapPoints] = useState([]);
+  const mapPointsRef = useRef([]); // Ref para acceder al estado actual en closures (WebSocket)
+
+  useEffect(() => {
+    mapPointsRef.current = mapPoints;
+  }, [mapPoints]);
+
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  
+  // Control de carga incremental
+  const loadIdRef = useRef(0);
 
   // Cargar opciones de filtros al iniciar y configurar auto-refresh
   useEffect(() => {
@@ -35,15 +44,15 @@ function App() {
     loadInitialData();
     setupWebSocket();
 
-    // Auto-refresh cada 10 segundos para mostrar datos en tiempo real
-    const refreshInterval = setInterval(() => {
-      console.log('🔄 Auto-refreshing data...');
-      loadData();
-    }, 10000);
+    // Auto-refresh desactivado para evitar recargas constantes de datos masivos
+    // const refreshInterval = setInterval(() => {
+    //   console.log('🔄 Auto-refreshing data...');
+    //   loadData();
+    // }, 10000);
 
     return () => {
       WebSocketService.disconnect();
-      clearInterval(refreshInterval);
+      // clearInterval(refreshInterval);
     };
   }, []);
 
@@ -74,8 +83,11 @@ function App() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = async (isUpdate = false) => {
     try {
+      // Incrementar ID de carga para invalidar cargas anteriores
+      const currentLoadId = ++loadIdRef.current;
+
       // Preparar filtros activos
       const activeFilters = {};
       Object.entries(selectedFilters).forEach(([key, value]) => {
@@ -99,9 +111,60 @@ function App() {
         mapFilters.municipio = activeFilters.municipios[0];
       }
 
-      const mapResponse = await ApiService.getMapPoints(mapFilters);
-      if (mapResponse.success) {
-        setMapPoints(mapResponse.points);
+      // Si hay filtros activos, cargar normal (menos datos)
+      if (Object.keys(mapFilters).length > 0) {
+        const mapResponse = await ApiService.getSignals(mapFilters);
+        if (mapResponse.success) {
+          if (currentLoadId === loadIdRef.current) {
+            setMapPoints(mapResponse.data);
+          }
+        }
+      } else {
+        // Carga incremental para todos los datos
+        let offset = 0;
+        
+        if (isUpdate && currentLoadId === loadIdRef.current) {
+          // Si es actualización, empezamos desde el último punto cargado
+          offset = mapPointsRef.current.length;
+          console.log(`Actualizando datos: buscando nuevos registros desde offset ${offset}`);
+        } else if (currentLoadId === loadIdRef.current) {
+          // Si es carga nueva, limpiamos todo
+          setMapPoints([]); 
+        }
+        
+        const limit = 25000;
+        let hasMore = true;
+
+        const loadChunk = async () => {
+          // Verificar si esta carga sigue siendo válida
+          if (currentLoadId !== loadIdRef.current) return;
+          if (!hasMore) return;
+
+          console.log(`Cargando chunk: offset=${offset}, limit=${limit}`);
+          const response = await ApiService.getSignals({}, offset, limit);
+          
+          // Verificar nuevamente después del await
+          if (currentLoadId !== loadIdRef.current) return;
+
+          if (response.success && response.data.length > 0) {
+            setMapPoints(prev => [...prev, ...response.data]);
+            offset += limit;
+            
+            // Si recibimos menos del límite, es el último chunk
+            if (response.data.length < limit) {
+              hasMore = false;
+              console.log('Carga completa finalizada');
+            } else {
+              // Programar siguiente chunk en 5 segundos
+              setTimeout(loadChunk, 5000);
+            }
+          } else {
+            hasMore = false;
+          }
+        };
+
+        // Iniciar carga incremental
+        loadChunk();
       }
 
       setLastUpdate(new Date());
@@ -129,8 +192,8 @@ function App() {
     // Listener para nuevos datos
     WebSocketService.on('update', (data) => {
       console.log('Nuevos datos recibidos:', data.length);
-      // Recargar datos cuando lleguen actualizaciones
-      loadData();
+      // Recargar datos cuando lleguen actualizaciones (modo append)
+      loadData(true);
     });
 
     // Listener para nueva señal individual
@@ -163,7 +226,7 @@ function App() {
       });
       WebSocketService.requestRefresh(activeFilters);
     } else {
-      loadData();
+      loadData(true); // true = modo actualización (append)
     }
   };
 
