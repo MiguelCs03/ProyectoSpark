@@ -8,6 +8,8 @@ import MapView from './components/MapView';
 import FilterSidebar from './components/FilterSidebar';
 import StatsCards from './components/StatsCards';
 import Charts from './components/Charts';
+import OperatorAnalysis from './components/OperatorAnalysis';
+import DistrictCharts from './components/DistrictCharts';
 import ApiService from './services/api';
 import WebSocketService from './services/websocket';
 import './index.css';
@@ -27,14 +29,21 @@ function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
-  // Cargar opciones de filtros al iniciar
+  // Cargar opciones de filtros al iniciar y configurar auto-refresh
   useEffect(() => {
     loadFilterOptions();
     loadInitialData();
     setupWebSocket();
 
+    // Auto-refresh cada 10 segundos para mostrar datos en tiempo real
+    const refreshInterval = setInterval(() => {
+      console.log('🔄 Auto-refreshing data...');
+      loadData();
+    }, 10000);
+
     return () => {
       WebSocketService.disconnect();
+      clearInterval(refreshInterval);
     };
   }, []);
 
@@ -221,12 +230,26 @@ function App() {
             <MapView
               points={mapPoints}
               selectedFilters={selectedFilters}
+              heatmapData={stats?.signal_heatmap || []}
             />
           </div>
 
           {/* Gráficos */}
           <div className="mt-2">
             <Charts stats={stats} />
+          </div>
+
+          {/* Análisis por Operadora */}
+          <div className="mt-2">
+            <OperatorAnalysis stats={stats} />
+          </div>
+
+          {/* Gráficas por Distrito */}
+          <div className="mt-2">
+            <DistrictCharts
+              stats={stats}
+              selectedOperator={selectedFilters.selectedOperator}
+            />
           </div>
 
           {/* Footer con información */}

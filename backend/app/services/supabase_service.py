@@ -19,13 +19,14 @@ class SupabaseService:
         )
         self.table_name = "locations"  # Tabla de ubicaciones/señales
     
-    def get_all_signals(self, limit: int = 60000) -> List[Dict[str, Any]]:
-        """Obtiene todas las señales con límite."""
+    def get_all_signals(self) -> List[Dict[str, Any]]:
+        """Obtiene TODAS las señales sin límite para análisis completo."""
         try:
+            # Sin límite - traer todos los datos para análisis completo
             response = self.client.table(self.table_name)\
                 .select("*")\
-                .limit(limit)\
                 .execute()
+            logger.info(f"Fetched {len(response.data)} signals from database")
             # Normalizar tipos de datos para Spark
             return self._normalize_data(response.data)
         except Exception as e:
@@ -80,7 +81,9 @@ class SupabaseService:
             if filters.get("signal_min"):
                 query = query.gte("signal", filters["signal_min"])
             
-            response = query.limit(60000).execute()
+            # Sin límite - procesar todos los datos que cumplan los filtros
+            response = query.execute()
+            logger.info(f"Fetched {len(response.data)} filtered signals")
             return self._normalize_data(response.data)
         except Exception as e:
             logger.error(f"Error fetching filtered signals: {e}")

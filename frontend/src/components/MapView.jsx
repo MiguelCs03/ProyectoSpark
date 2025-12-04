@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Popup, GeoJSON, useMap } from 'react-leaflet';
+import HeatmapLayer from './HeatmapLayer';
 import 'leaflet/dist/leaflet.css';
 
 // Configuración del mapa centrado en Santa Cruz, Bolivia
@@ -35,8 +36,11 @@ function MapBounds({ points }) {
     return null;
 }
 
-export default function MapView({ points = [], selectedFilters }) {
+export default function MapView({ points = [], selectedFilters, heatmapData = [] }) {
     const [districtsData, setDistrictsData] = useState(null);
+    const [provincesData, setProvincesData] = useState(null);
+    const [showHeatmap, setShowHeatmap] = useState(true);
+    const [heatmapMetric, setHeatmapMetric] = useState('signal'); // 'signal' or 'speed'
 
     // Cargar datos de distritos
     useEffect(() => {
@@ -44,18 +48,42 @@ export default function MapView({ points = [], selectedFilters }) {
             .then(response => response.json())
             .then(data => setDistrictsData(data))
             .catch(error => console.error('Error loading districts:', error));
+
+        // Cargar datos de provincias
+        fetch('/santa-cruz-provinces.geojson')
+            .then(response => response.json())
+            .then(data => setProvincesData(data))
+            .catch(error => console.error('Error loading provinces:', error));
     }, []);
 
-    const getMarkerColor = (tipoSenal) => {
-        return SIGNAL_COLORS[tipoSenal] || SIGNAL_COLORS.default;
+    // Función para obtener color basado en intensidad de señal (COLORES MÁS VIBRANTES)
+    const getSignalColor = (signal) => {
+        // Señal en dBm: -40 (excelente) a -100 (pobre)
+        if (signal >= -60) return '#00ff00';  // Verde neón - Excelente
+        if (signal >= -70) return '#7df900';  // Verde lima - Muy buena
+        if (signal >= -80) return '#ffff00';  // Amarillo puro - Buena
+        if (signal >= -90) return '#ff6600';  // Naranja intenso - Regular
+        return '#ff0000';  // Rojo puro - Pobre
     };
 
-    const getMarkerSize = (nivelBateria) => {
-        // Tamaño basado en nivel de batería
-        if (nivelBateria >= 80) return 8;
-        if (nivelBateria >= 50) return 6;
-        return 4;
+    const getMarkerSize = (signal) => {
+        // Tamaño basado en calidad de señal (MÁS GRANDE)
+        if (signal >= -60) return 12;  // Excelente
+        if (signal >= -70) return 10;   // Muy buena
+        if (signal >= -80) return 8;   // Buena
+        if (signal >= -90) return 6;   // Regular
+        return 5;  // Pobre
     };
+
+    // Filtrar puntos por operadora seleccionada
+    const filteredPoints = selectedFilters?.selectedOperator
+        ? points.filter(p => p.sim_operator === selectedFilters.selectedOperator)
+        : points;
+
+    // Filtrar heatmap por operadora
+    const filteredHeatmap = selectedFilters?.selectedOperator
+        ? heatmapData.filter(h => h.operator === selectedFilters.selectedOperator)
+        : heatmapData;
 
     // Paleta de colores para provincias
     const PROVINCE_COLORS = {
@@ -180,39 +208,77 @@ export default function MapView({ points = [], selectedFilters }) {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
+
                 {/* Capa de distritos/provincias/zonas */}
-                {districtsData && shouldShowLayer && (
+                {shouldShowLayer && selectedFilters?.layer === 'distritos' && districtsData && (
                     <GeoJSON
-                        key={selectedFilters?.layer} // Forzar re-render al cambiar capa
+                        key="districts"
                         data={districtsData}
                         style={getGeoStyle}
                         onEachFeature={onEachDistrict}
                     />
                 )}
 
-                {points.length > 0 && <MapBounds points={points} />}
+                {shouldShowLayer && selectedFilters?.layer === 'provincias' && provincesData && (
+                    <GeoJSON
+                        key="provinces"
+                        data={provincesData}
+                        style={getGeoStyle}
+                        onEachFeature={onEachDistrict}
+                    />
+                )}
 
-                {points.map((point, index) => (
+                {shouldShowLayer && selectedFilters?.layer === 'zonas' && districtsData && (
+                    <GeoJSON
+                        key="zones"
+                        data={districtsData}
+                        style={getGeoStyle}
+                        onEachFeature={onEachDistrict}
+                    />
+                )}
+
+                {/* Mapa de calor de señal/velocidad */}
+                {showHeatmap && filteredHeatmap.length > 0 && (
+                    <HeatmapLayer
+                        heatmapData={filteredHeatmap}
+                        metric={heatmapMetric}
+                    />
+                )}
+
+                {filteredPoints.length > 0 && <MapBounds points={filteredPoints} />}
+
+                {filteredPoints.map((point, index) => (
                     <CircleMarker
                         key={`marker-${index}`}
                         center={[point.lat, point.lng]}
-                        radius={getMarkerSize(point.nivel_bateria || 50)}
-                        fillColor={getMarkerColor(point.tipo_senal)}
+                        radius={getMarkerSize(point.signal || -80)}
+                        fillColor={getSignalColor(point.signal || -80)}
                         color="#fff"
                         weight={1}
                         opacity={0.9}
-                        fillOpacity={0.7}
+                        fillOpacity={0.8}
                     >
                         <Popup>
-                            <div style={{ minWidth: '200px' }}>
-                                <h3 style={{ margin: '0 0 10px 0', fontSize: '16px', fontWeight: 'bold' }}>
-                                    📡 {point.tipo_senal}
+                            <div style={{ minWidth: '220px' }}>
+                                <h3 style={{
+                                    margin: '0 0 10px 0',
+                                    fontSize: '16px',
+                                    fontWeight: 'bold',
+                                    color: getSignalColor(point.signal || -80)
+                                }}>
+                                    📡 {point.sim_operator || 'Unknown'}
                                 </h3>
                                 <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                                    <p><strong>Empresa:</strong> {point.empresa}</p>
-                                    <p><strong>Provincia:</strong> {point.provincia || 'N/A'}</p>
-                                    <p><strong>Municipio:</strong> {point.municipio || 'N/A'}</p>
-                                    <p><strong>Batería:</strong> {point.nivel_bateria}%</p>
+                                    <p><strong>Tipo de Red:</strong> {point.network_type || 'N/A'}</p>
+                                    <p><strong>Dispositivo:</strong> {point.device_name || 'N/A'}</p>
+                                    <p style={{
+                                        color: getSignalColor(point.signal || -80),
+                                        fontWeight: 'bold'
+                                    }}>
+                                        <strong>Señal:</strong> {point.signal || 'N/A'} dBm
+                                    </p>
+                                    <p><strong>Batería:</strong> {point.battery || 'N/A'}%</p>
+                                    <p><strong>Velocidad:</strong> {point.speed ? point.speed.toFixed(2) : 'N/A'} m/s</p>
                                     <p><strong>Coordenadas:</strong></p>
                                     <p style={{ fontSize: '12px', color: '#666' }}>
                                         Lat: {point.lat.toFixed(5)}<br />
@@ -229,25 +295,93 @@ export default function MapView({ points = [], selectedFilters }) {
                 position: 'absolute',
                 bottom: '20px',
                 right: '20px',
-                background: 'rgba(0, 0, 0, 0.8)',
+                background: 'rgba(0, 0, 0, 0.85)',
                 padding: '15px',
                 borderRadius: '8px',
                 color: 'white',
                 fontSize: '12px',
-                zIndex: 1000
+                zIndex: 1000,
+                maxWidth: '250px'
             }}>
-                <h4 style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>Tipo de Señal</h4>
-                {Object.entries(SIGNAL_COLORS).filter(([key]) => key !== 'default').map(([type, color]) => (
-                    <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
-                        <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: color }}></div>
-                        <span>{type}</span>
+                <h4 style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>📊 Intensidad de Señal</h4>
+
+                {/* Escala de colores por señal */}
+                <div style={{ marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#00ff00', boxShadow: '0 0 8px #00ff00' }}></div>
+                        <span>Excelente (-40 a -60 dBm)</span>
                     </div>
-                ))}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#7df900', boxShadow: '0 0 6px #7df900' }}></div>
+                        <span>Muy Buena (-60 a -70 dBm)</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#ffff00', boxShadow: '0 0 6px #ffff00' }}></div>
+                        <span>Buena (-70 a -80 dBm)</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#ff6600', boxShadow: '0 0 6px #ff6600' }}></div>
+                        <span>Regular (-80 a -90 dBm)</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
+                        <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#ff0000', boxShadow: '0 0 8px #ff0000' }}></div>
+                        <span>Pobre (&lt; -90 dBm)</span>
+                    </div>
+                </div>
+
+                {/* Operadora seleccionada */}
+                {selectedFilters?.selectedOperator && (
+                    <div style={{
+                        marginTop: '10px',
+                        paddingTop: '10px',
+                        borderTop: '1px solid rgba(255,255,255,0.3)',
+                        fontWeight: 'bold',
+                        color: '#22c55e'
+                    }}>
+                        📡 Mostrando: {selectedFilters.selectedOperator}
+                    </div>
+                )}
+
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div style={{ width: '20px', height: '2px', background: '#22c55e' }}></div>
                         <span>Distritos</span>
                     </div>
+                </div>
+
+                {/* Controles de Mapa de Calor */}
+                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontWeight: 'bold' }}>Mapa de Calor</h4>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                            type="checkbox"
+                            checked={showHeatmap}
+                            onChange={(e) => setShowHeatmap(e.target.checked)}
+                        />
+                        <span>Mostrar</span>
+                    </label>
+                    {showHeatmap && (
+                        <div style={{ marginLeft: '20px' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', cursor: 'pointer' }}>
+                                <input
+                                    type="radio"
+                                    name="heatmap-metric"
+                                    checked={heatmapMetric === 'signal'}
+                                    onChange={() => setHeatmapMetric('signal')}
+                                />
+                                <span>Señal</span>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                <input
+                                    type="radio"
+                                    name="heatmap-metric"
+                                    checked={heatmapMetric === 'speed'}
+                                    onChange={() => setHeatmapMetric('speed')}
+                                />
+                                <span>Velocidad</span>
+                            </label>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

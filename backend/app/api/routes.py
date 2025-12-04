@@ -82,14 +82,19 @@ async def get_aggregated_data(filters: FilterParams):
         if filter_dict:
             df = spark_etl_service.filter_dataframe(df, filter_dict)
         
-        # Calcular agregaciones
+        # Calcular agregaciones básicas
         stats = spark_etl_service.calculate_statistics(df)
         by_company = spark_etl_service.aggregate_by_company(df)
         by_type = spark_etl_service.aggregate_by_signal_type(df)
         by_geography = spark_etl_service.aggregate_by_geography(df)
         
+        # Análisis avanzados
+        speed_by_operator = spark_etl_service.analyze_speed_by_operator(df)
+        signal_heatmap = spark_etl_service.analyze_signal_by_district(df)
+        coverage_analysis = spark_etl_service.analyze_coverage_by_operator(df)
+        district_analysis = spark_etl_service.analyze_by_district(df)
+        
         # Si no hay filtros, usar el conteo total real de la base de datos
-        # Esto permite mostrar "600,000" señales aunque solo procesemos una muestra
         if not filter_dict:
             real_total = supabase_service.get_total_count()
             if real_total > 0:
@@ -102,7 +107,12 @@ async def get_aggregated_data(filters: FilterParams):
             "signals_by_company": by_company,
             "signals_by_type": by_type,
             "geographic_distribution": by_geography,
-            "statistics": stats
+            "statistics": stats,
+            # Análisis avanzados
+            "speed_by_operator": speed_by_operator,
+            "signal_heatmap": signal_heatmap,
+            "coverage_analysis": coverage_analysis,
+            "district_analysis": district_analysis
         }
     except Exception as e:
         logger.error(f"Error in get_aggregated_data: {e}")

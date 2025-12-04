@@ -97,6 +97,59 @@ export default function FilterSidebar({
                 </div>
             </div>
 
+            {/* Filtro por Operadora */}
+            <div className="filter-group">
+                <h3>📡 Filtrar por Operadora</h3>
+                <div className="filter-options">
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="operator-all"
+                            name="operator-filter"
+                            defaultChecked
+                            onChange={() => onFilterChange({ ...localFilters, selectedOperator: null })}
+                        />
+                        <label htmlFor="operator-all">Todas</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="operator-entel"
+                            name="operator-filter"
+                            onChange={() => onFilterChange({ ...localFilters, selectedOperator: 'ENTEL' })}
+                        />
+                        <label htmlFor="operator-entel">🔴 ENTEL</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="operator-tigo"
+                            name="operator-filter"
+                            onChange={() => onFilterChange({ ...localFilters, selectedOperator: 'TIGO' })}
+                        />
+                        <label htmlFor="operator-tigo">🔵 TIGO</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="operator-viva"
+                            name="operator-filter"
+                            onChange={() => onFilterChange({ ...localFilters, selectedOperator: 'VIVA' })}
+                        />
+                        <label htmlFor="operator-viva">🟢 VIVA</label>
+                    </div>
+                    <div className="filter-checkbox">
+                        <input
+                            type="radio"
+                            id="operator-entel-alt"
+                            name="operator-filter"
+                            onChange={() => onFilterChange({ ...localFilters, selectedOperator: 'Entel' })}
+                        />
+                        <label htmlFor="operator-entel-alt">Entel</label>
+                    </div>
+                </div>
+            </div>
+
             <h3 style={{ marginTop: '20px' }}>Filtros de Datos</h3>
 
             {/* Provincias */}

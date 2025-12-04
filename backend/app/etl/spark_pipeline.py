@@ -150,6 +150,142 @@ class SparkETLService:
             for row in points
         ]
     
+    def analyze_speed_by_operator(self, df: DataFrame) -> Dict[str, Any]:
+        """Analiza velocidad promedio por operadora."""
+        speed_stats = df.groupBy("sim_operator").agg(
+            F.avg("speed").alias("avg_speed"),
+            F.max("speed").alias("max_speed"),
+            F.min("speed").alias("min_speed"),
+            F.count("*").alias("total_measurements")
+        ).collect()
+        
+        return {
+            row["sim_operator"]: {
+                "avg_speed": round(row["avg_speed"], 2) if row["avg_speed"] else 0,
+                "max_speed": round(row["max_speed"], 2) if row["max_speed"] else 0,
+                "min_speed": round(row["min_speed"], 2) if row["min_speed"] else 0,
+                "total": row["total_measurements"]
+            }
+            for row in speed_stats if row["sim_operator"]
+        }
+    
+    def analyze_signal_by_district(self, df: DataFrame) -> List[Dict[str, Any]]:
+        """Analiza calidad de señal promedio por ubicación geográfica (para mapa de calor)."""
+        # Agrupar por coordenadas aproximadas (redondear a 3 decimales para agrupar zonas cercanas)
+        heatmap_data = df.withColumn("lat_rounded", F.round(F.col("latitude"), 3))\
+                         .withColumn("lng_rounded", F.round(F.col("longitude"), 3))\
+                         .groupBy("lat_rounded", "lng_rounded").agg(
+                             F.avg("signal").alias("avg_signal"),
+                             F.avg("speed").alias("avg_speed"),
+                             F.count("*").alias("measurements"),
+                             F.first("sim_operator").alias("primary_operator")
+                         ).collect()
+        
+        return [
+            {
+                "lat": row["lat_rounded"],
+                "lng": row["lng_rounded"],
+                "signal": round(row["avg_signal"], 2) if row["avg_signal"] else 0,
+                "speed": round(row["avg_speed"], 2) if row["avg_speed"] else 0,
+                "count": row["measurements"],
+                "operator": row["primary_operator"]
+            }
+            for row in heatmap_data
+        ]
+    
+    def analyze_coverage_by_operator(self, df: DataFrame) -> Dict[str, Any]:
+        """Analiza cobertura geográfica por operadora."""
+        coverage = df.groupBy("sim_operator").agg(
+            F.countDistinct("latitude", "longitude").alias("unique_locations"),
+            F.avg("signal").alias("avg_signal_strength"),
+            F.count("*").alias("total_records")
+        ).collect()
+        
+        return {
+            row["sim_operator"]: {
+                "unique_locations": row["unique_locations"],
+                "avg_signal": round(row["avg_signal_strength"], 2) if row["avg_signal_strength"] else 0,
+                "total_records": row["total_records"]
+            }
+            for row in coverage if row["sim_operator"]
+        }
+
+    def analyze_by_district(self, df: DataFrame, geojson_path: str = None) -> Dict[str, Any]:
+        """Analiza datos agrupados por distrito geográfico."""
+        import json
+        
+        # Cargar GeoJSON con distritos si está disponible
+        district_mapping = {}
+        if geojson_path:
+            try:
+                with open(geojson_path, 'r', encoding='utf-8') as f:
+                    geojson_data = json.load(f)
+                    for feature in geojson_data.get('features', []):
+                        props = feature.get('properties', {})
+                        district_name = props.get('distrito') or props.get('nombreciud', 'Unknown')
+                        # Simplificar para matching
+                        district_mapping[district_name] = {
+                            'nombre': district_name,
+                            'poblacion': props.get('poblacion', 0),
+                            'viviendas': props.get('viviendas', 0)
+                        }
+            except Exception as e:
+                logger.error(f"Error loading GeoJSON: {e}")
+        
+        # Crear "distrito virtual" basado en coordenadas redondeadas
+        # (agrupación por zonas geográficas)
+        district_stats = df.withColumn("virtual_district", 
+                                       F.concat(
+                                           F.round(F.col("latitude"), 2).cast("string"),
+                                           F.lit("_"),
+                                           F.round(F.col("longitude"), 2).cast("string")
+                                       ))\
+                          .groupBy("virtual_district").agg(
+                              F.count("*").alias("total_signals"),
+                              F.avg("signal").alias("avg_signal"),
+                              F.avg("speed").alias("avg_speed"),
+                              F.first("latitude").alias("lat"),
+                              F.first("longitude").alias("lng"),
+                              # Contar por operadora
+                              F.sum(F.when(F.col("sim_operator") == "ENTEL", 1).otherwise(0)).alias("count_entel"),
+                              F.sum(F.when(F.col("sim_operator") == "TIGO", 1).otherwise(0)).alias("count_tigo"),
+                              F.sum(F.when(F.col("sim_operator") == "VIVA", 1).otherwise(0)).alias("count_viva"),
+                              # Contar por tipo de red
+                              F.sum(F.when(F.col("network_type") == "WiFi", 1).otherwise(0)).alias("count_wifi"),
+                              F.sum(F.when(F.col("network_type") == "4G", 1).otherwise(0)).alias("count_4g"),
+                              F.sum(F.when(F.col("network_type") == "3G", 1).otherwise(0)).alias("count_3g")
+                          ).collect()
+        
+        results = []
+        for row in district_stats:
+            district_data = {
+                "district_id": row["virtual_district"],
+                "coordinates": {"lat": row["lat"], "lng": row["lng"]},
+                "total_signals": row["total_signals"],
+                "avg_signal": round(row["avg_signal"], 2) if row["avg_signal"] else 0,
+                "avg_speed": round(row["avg_speed"], 2) if row["avg_speed"] else 0,
+                "operators": {
+                    "ENTEL": row["count_entel"],
+                    "TIGO": row["count_tigo"],
+                    "VIVA": row["count_viva"]
+                },
+                "network_types": {
+                    "WiFi": row["count_wifi"],
+                    "4G": row["count_4g"],
+                    "3G": row["count_3g"]
+                }
+            }
+            results.append(district_data)
+        
+        # Ordenar por total de señales (descendente)
+        results.sort(key=lambda x: x["total_signals"], reverse=True)
+        
+        return {
+            "districts": results[:50],  # Top 50 distritos
+            "total_districts": len(results)
+        }
+
+    
     def stop(self):
         """Detiene la sesión de Spark."""
         self.spark.stop()
