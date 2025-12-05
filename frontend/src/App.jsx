@@ -45,15 +45,15 @@ function App() {
     loadInitialData();
     setupWebSocket();
 
-    // Auto-refresh cada 10 segundos para cargar más datos incrementalmente
-    const refreshInterval = setInterval(() => {
-      console.log('🔄 Auto-refreshing data...');
-      loadData(true); // true = modo actualización (append)
-    }, 10000);
+    // Auto-refresh desactivado para evitar saturación
+    // const refreshInterval = setInterval(() => {
+    //   console.log('🔄 Auto-refreshing data...');
+    //   loadData(true); // true = modo actualización (append)
+    // }, 10000);
 
     return () => {
       WebSocketService.disconnect();
-      clearInterval(refreshInterval);
+      // clearInterval(refreshInterval);
     };
   }, []);
 
@@ -79,8 +79,16 @@ function App() {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      await loadData();
-    } finally {
+      // Solo cargar opciones de filtros y preparar el mapa
+      // Las stats se cargarán en segundo plano sin bloquear la UI
+      loadData();
+      
+      // Esperar un poco para mostrar la interfaz inmediatamente
+      setTimeout(() => {
+        setLoading(false);
+      }, 1000);
+    } catch (error) {
+      console.error('Error in initial load:', error);
       setLoading(false);
     }
   };
@@ -118,23 +126,36 @@ function App() {
         }
       });
 
-      // Cargar estadísticas agregadas
-      console.log('🔄 Cargando datos agregados...');
+      // Cargar estadísticas agregadas en segundo plano (no bloquear)
+      console.log('🔄 Iniciando carga de estadísticas...');
       console.log('Filtros activos:', activeFilters);
 
-      const statsResponse = await ApiService.getAggregatedData(activeFilters);
-      console.log('📊 Respuesta de estadísticas:', statsResponse);
-
-      if (statsResponse.success) {
-        console.log('✅ Datos de stats recibidos:', {
-          total_signals: statsResponse.total_signals,
-          signals_by_company: statsResponse.signals_by_company,
-          signal_heatmap: statsResponse.signal_heatmap?.length || 0
+      // Cargar stats de forma asíncrona sin bloquear el resto
+      ApiService.getAggregatedData(activeFilters)
+        .then(statsResponse => {
+          console.log('📊 Respuesta de estadísticas:', statsResponse);
+          if (statsResponse.success) {
+            console.log('✅ Datos de stats recibidos:', {
+              total_signals: statsResponse.total_signals,
+              signals_by_company: statsResponse.signals_by_company,
+              signal_heatmap: statsResponse.signal_heatmap?.length || 0
+            });
+            setStats(statsResponse);
+          } else {
+            console.error('❌ Error: statsResponse.success is false');
+          }
+        })
+        .catch(error => {
+          console.error('❌ Error loading stats:', error);
+          // Continuar con valores por defecto si falla
+          setStats({
+            success: true,
+            total_signals: 0,
+            signals_by_company: {},
+            signals_by_type: {},
+            signal_heatmap: []
+          });
         });
-        setStats(statsResponse);
-      } else {
-        console.error('❌ Error: statsResponse.success is false');
-      }
 
       // Cargar puntos del mapa
       const mapFilters = {};
@@ -154,56 +175,64 @@ function App() {
           }
         }
       } else {
-        // Carga incremental para todos los datos
-        let offset = lastOffsetRef.current; // Empezar desde el último offset
+        // Carga incremental optimizada para 500k+ registros
+        let offset = lastOffsetRef.current;
 
         if (isUpdate && currentLoadId === loadIdRef.current) {
-          // Si es actualización, continuar desde donde quedamos
           console.log(`📊 Actualizando datos: continuando desde offset ${offset}`);
         } else if (currentLoadId === loadIdRef.current) {
-          // Si es carga nueva, resetear
           setMapPoints([]);
           offset = 0;
           lastOffsetRef.current = 0;
           console.log('🔄 Reiniciando carga desde 0');
         }
 
-        const limit = 25000; // Cargar 25000 registros por vez
-        let hasMore = true;
+        const CHUNK_SIZE = 25000; // 25k por petición para balance velocidad/tamaño
+        const MAX_RECORDS = 500000; // Límite total a cargar
+        let loadedCount = 0;
 
-        const loadChunk = async () => {
-          // Verificar si esta carga sigue siendo válida
+        const loadNextBatch = async () => {
           if (currentLoadId !== loadIdRef.current) return;
-          if (!hasMore) return;
+          if (offset >= MAX_RECORDS) {
+            console.log('✅ Alcanzado límite de 500k registros');
+            return;
+          }
 
-          console.log(`📦 Cargando chunk: offset=${offset}, limit=${limit}`);
-          const response = await ApiService.getSignals({}, offset, limit);
+          try {
+            console.log(`📦 Cargando batch: offset=${offset}, limit=${CHUNK_SIZE}`);
+            const response = await ApiService.getSignals({}, offset, CHUNK_SIZE);
 
-          // Verificar nuevamente después del await
-          if (currentLoadId !== loadIdRef.current) return;
+            if (currentLoadId !== loadIdRef.current) return;
 
-          if (response.success && response.data.length > 0) {
-            setMapPoints(prev => [...prev, ...response.data]);
-            offset += response.data.length; // Usar la cantidad real recibida
-            lastOffsetRef.current = offset; // Guardar el offset actual
+            if (response.success && response.data.length > 0) {
+              setMapPoints(prev => [...prev, ...response.data]);
+              loadedCount += response.data.length;
+              offset += response.data.length;
+              lastOffsetRef.current = offset;
 
-            console.log(`✅ Cargados ${response.data.length} registros. Total acumulado: ${offset}`);
+              console.log(`✅ Cargados ${response.data.length} registros. Total: ${loadedCount}/${MAX_RECORDS}`);
 
-            // Si recibimos menos del límite, es el último chunk
-            if (response.data.length < limit) {
-              hasMore = false;
-              console.log('✅ Carga completa finalizada');
+              // Si recibimos datos completos y no alcanzamos el límite, continuar
+              if (response.data.length === CHUNK_SIZE && offset < MAX_RECORDS) {
+                // Continuar inmediatamente sin espera
+                setTimeout(loadNextBatch, 50);
+              } else {
+                console.log('🏁 Carga finalizada');
+              }
             } else {
-              // Programar siguiente chunk en 2 segundos
-              setTimeout(loadChunk, 2000);
+              console.log('🏁 No hay más datos disponibles');
             }
-          } else {
-            hasMore = false;
+          } catch (error) {
+            console.error(`❌ Error cargando batch:`, error);
+            // Reintentar después de 3 segundos
+            if (offset < MAX_RECORDS) {
+              setTimeout(loadNextBatch, 3000);
+            }
           }
         };
 
-        // Iniciar carga incremental
-        loadChunk();
+        // Iniciar carga
+        loadNextBatch();
       }
 
       setLastUpdate(new Date());

@@ -18,7 +18,12 @@ export default function FilterSidebar({
 
     useEffect(() => {
         if (selectedFilters) {
-            setLocalFilters(selectedFilters);
+            setLocalFilters({
+                provincias: selectedFilters.provincias || [],
+                municipios: selectedFilters.municipios || [],
+                empresas: selectedFilters.empresas || [],
+                tipos_senal: selectedFilters.tipos_senal || []
+            });
         }
     }, [selectedFilters]);
 
@@ -47,7 +52,7 @@ export default function FilterSidebar({
         onFilterChange(emptyFilters);
     };
 
-    const hasActiveFilters = Object.values(localFilters).some(arr => arr.length > 0);
+    const hasActiveFilters = Object.values(localFilters).some(arr => Array.isArray(arr) && arr.length > 0);
 
     return (
         <div className="sidebar">

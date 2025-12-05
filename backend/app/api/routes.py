@@ -2,6 +2,7 @@
 Endpoints REST de la API.
 """
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import ORJSONResponse
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from app.models.signal import FilterParams, AggregatedData
@@ -45,7 +46,7 @@ def save_to_cache(key: str, data: Any):
     logger.info(f"✓ Saved to cache: {key[:8]}... (cache size: {len(_cache)})")
 
 
-@router.get("/signals")
+@router.get("/signals", response_class=ORJSONResponse)
 async def get_signals(
     limit: int = Query(300000, description="Límite de registros"),
     offset: int = Query(0, description="Desplazamiento de registros"),
@@ -108,7 +109,9 @@ async def get_aggregated_data(filters: FilterParams):
         if filter_dict:
             raw_data = supabase_service.get_signals_with_filters(filter_dict)
         else:
-            raw_data = supabase_service.get_all_signals()
+            # Limitar a 100k para análisis rápido inicial
+            # Los usuarios pueden cargar más datos incrementalmente en el mapa
+            raw_data = supabase_service.get_all_signals(limit=100000)
         
         if not raw_data:
             return {

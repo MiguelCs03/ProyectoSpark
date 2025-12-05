@@ -7,6 +7,9 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType, TimestampType
 from typing import List, Dict, Any
 import logging
+import tempfile
+import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,9 @@ class SparkETLService:
         self.spark = SparkSession.builder \
             .appName("SantaCruzSignalETL") \
             .master("local[*]") \
-            .config("spark.driver.memory", "2g") \
+            .config("spark.driver.memory", "4g") \
+            .config("spark.executor.memory", "4g") \
+            .config("spark.sql.execution.arrow.pyspark.enabled", "true") \
             .getOrCreate()
         
         self.spark.sparkContext.setLogLevel("WARN")
@@ -28,11 +33,32 @@ class SparkETLService:
         if not data:
             return self.spark.createDataFrame([], self._get_schema())
         
-        # Convertir a JSON y luego cargar - Spark maneja mejor los tipos así
-        import json
-        json_data = [json.dumps(row) for row in data]
-        json_rdd = self.spark.sparkContext.parallelize(json_data)
-        return self.spark.read.json(json_rdd)
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8') as tmp:
+                for row in data:
+                    tmp.write(json.dumps(row) + '\n')
+                tmp_path = tmp.name
+            
+            logger.info(f"Data written to temp file: {tmp_path}")
+            
+            # Leer con Spark
+            df = self.spark.read.json(tmp_path)
+            
+            # Forzar la lectura para asegurar que el archivo se procesa
+            # Esto evita problemas de lazy evaluation si el archivo se borra o bloquea
+            df.cache()
+            count = df.count()
+            logger.info(f"DataFrame created with {count} rows from temp file")
+            
+            return df
+
+        except Exception as e:
+            logger.error(f"Error creating DataFrame via temp file: {e}")
+            try:
+                return self.spark.createDataFrame(data)
+            except Exception as e2:
+                logger.error(f"Error creating DataFrame directly: {e2}")
+                return self.spark.createDataFrame([], self._get_schema())
     
     def _get_schema(self) -> StructType:
         """Define schema de los datos - KISS: campos esenciales."""

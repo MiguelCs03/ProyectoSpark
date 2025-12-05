@@ -19,12 +19,12 @@ class SupabaseService:
         )
         self.table_name = "locations"  # Tabla de ubicaciones/señales
     
-    def get_all_signals(self, limit: int = 25000, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_all_signals(self, limit: int = 500000, offset: int = 0) -> List[Dict[str, Any]]:
         """Obtiene TODAS las señales con límite y offset configurables."""
         try:
-            # Limitar máximo a 25000 para evitar timeout
-            if limit > 25000:
-                limit = 25000
+            # Limitar máximo a 500000 para evitar timeout pero permitir grandes cargas
+            if limit > 500000:
+                limit = 500000
                 
             print(f"🔍 [DEBUG] Fetching signals from Supabase table '{self.table_name}'")
             print(f"🔍 [DEBUG] Range: {offset} to {offset + limit - 1}")
@@ -35,7 +35,7 @@ class SupabaseService:
             end = offset + limit - 1
             
             response = self.client.table(self.table_name)\
-                .select("latitude,longitude,signal,sim_operator,network_type,device_name,speed,battery,altitude")\
+                .select("latitude,longitude,signal,sim_operator,network_type,device_name,speed,battery,altitude,timestamp")\
                 .range(start, end)\
                 .execute()
             
@@ -52,26 +52,23 @@ class SupabaseService:
     
     def _normalize_data(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Normaliza tipos de datos para compatibilidad con Spark."""
-        normalized = []
-        for row in data:
-            # Fil trar rows sin ubicación válida
-            if not row.get('latitude') or not row.get('longitude'):
-                continue
-                
-            normalized_row = {
+        # Optimización: Usar list comprehension que es más rápido que append en loop
+        return [
+            {
                 **row,
-                'speed': float(row['speed']) if row.get('speed') is not None else 0.0,
-                'altitude': float(row['altitude']) if row.get('altitude') is not None else 0.0,
+                'speed': float(row.get('speed', 0.0) or 0.0),
+                'altitude': float(row.get('altitude', 0.0) or 0.0),
                 'latitude': float(row['latitude']),
                 'longitude': float(row['longitude']),
-                'battery': int(row['battery']) if row.get('battery') is not None else 0,
-                'signal': int(row['signal']) if row.get('signal') is not None else 0,
+                'battery': int(row.get('battery', 0) or 0),
+                'signal': int(row.get('signal', 0) or 0),
                 'sim_operator': str(row.get('sim_operator') or 'Unknown'),
                 'network_type': str(row.get('network_type') or 'Unknown'),
                 'device_name': str(row.get('device_name') or 'Unknown'),
             }
-            normalized.append(normalized_row)
-        return normalized
+            for row in data
+            if row.get('latitude') and row.get('longitude')
+        ]
     
     def get_signals_with_filters(self, filters: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Obtiene señales aplicando filtros."""

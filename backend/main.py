@@ -74,10 +74,12 @@ async def root():
 
 
 if __name__ == "__main__":
+    # Optimización: Usar workers para concurrencia si no estamos en modo reload
+    # Nota: reload y workers son incompatibles en uvicorn
     uvicorn.run(
         "main:app",
         host=config.API_HOST,
         port=config.API_PORT,
-        reload=True,
+        reload=True, # Mantener reload para desarrollo, pero limita a 1 worker
         log_level="info"
     )
