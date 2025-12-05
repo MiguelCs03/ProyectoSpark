@@ -31,11 +31,11 @@ function MapBounds({ points }) {
         if (points && points.length > 0) {
             // Si es la primera carga significativa (ej. > 0 puntos), ajustamos
             // Pero si estamos cargando incrementalmente, no queremos reajustar cada 5 segundos
-            
+
             // Estrategia: Ajustar solo si no hemos ajustado, o si los puntos cambiaron drásticamente (filtro nuevo)
             // Como detectamos filtro nuevo? points.length suele bajar a 0 o cambiar mucho.
             // Pero aquí points crece.
-            
+
             if (!hasFittedRef.current) {
                 const bounds = points
                     .map(p => {
@@ -44,7 +44,7 @@ function MapBounds({ points }) {
                         return (lat && lng) ? [lat, lng] : null;
                     })
                     .filter(b => b !== null);
-                    
+
                 if (bounds.length > 0) {
                     map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
                     hasFittedRef.current = true;
@@ -210,23 +210,282 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
     // Filtrar features según capa (opcional, por ahora mostramos todo el geojson con diferentes estilos)
     const shouldShowLayer = selectedFilters?.layer && selectedFilters.layer !== 'none';
 
+    // Función helper para verificar si un punto está dentro de un polígono
+    const isPointInPolygon = (point, geometry) => {
+        try {
+            if (!point || !point.latitude || !point.longitude) return false;
+
+            const lat = point.latitude;
+            const lng = point.longitude;
+
+            // Manejar tanto Polygon como MultiPolygon
+            let coordinates = geometry.coordinates;
+
+            if (geometry.type === 'MultiPolygon') {
+                // Para MultiPolygon, verificar cada polígono
+                for (let poly of coordinates) {
+                    if (checkPolygon(lng, lat, poly[0])) {
+                        return true;
+                    }
+                }
+                return false;
+            } else if (geometry.type === 'Polygon') {
+                return checkPolygon(lng, lat, coordinates[0]);
+            }
+
+            return false;
+        } catch (e) {
+            console.error('Error checking point in polygon:', e);
+            return false;
+        }
+    };
+
+    const checkPolygon = (x, y, polygon) => {
+        // Ray-casting algorithm
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i][0], yi = polygon[i][1];
+            const xj = polygon[j][0], yj = polygon[j][1];
+
+            const intersect = ((yi > y) !== (yj > y))
+                && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    };
+
+    // ALTERNATIVA MÁS SIMPLE: Usar bounding box + sampling
+    const getDistrictBounds = (geometry) => {
+        const coords = geometry.type === 'Polygon'
+            ? geometry.coordinates[0]
+            : geometry.coordinates[0][0];
+
+        let minLat = Infinity, maxLat = -Infinity;
+        let minLng = Infinity, maxLng = -Infinity;
+
+        coords.forEach(([lng, lat]) => {
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+            minLng = Math.min(minLng, lng);
+            maxLng = Math.max(maxLng, lng);
+        });
+
+        return { minLat, maxLat, minLng, maxLng };
+    };
+
+    // Calcular estadísticas del distrito
+    const calculateDistrictStats = (districtGeometry) => {
+        console.log('🔍 Calculando estadísticas del distrito...');
+        console.log('Total de puntos disponibles:', points.length);
+
+        // DEBUG: Ver estructura del primer punto
+        if (points.length > 0) {
+            console.log('🔬 Ejemplo de punto:', points[0]);
+            console.log('🔬 Tiene lat?', points[0].lat, 'lng?', points[0].lng);
+            console.log('🔬 Tiene latitude?', points[0].latitude, 'longitude?', points[0].longitude);
+        }
+
+        // Si no hay puntos, retornar stats vacías
+        if (!points || points.length === 0) {
+            console.log('⚠️ No hay puntos disponibles');
+            return {
+                total: 0,
+                avgSignal: 0,
+                avgSpeed: 0,
+                entel: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                tigo: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                viva: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                wifi: 0,
+                fourG: 0,
+                threeG: 0
+            };
+        }
+
+        // Primero usar bounding box para filtro rápido
+        const bounds = getDistrictBounds(districtGeometry);
+        console.log('📦 Bounds del distrito:', bounds);
+
+        // Filtrar por bounding box primero (mucho más rápido)
+        const pointsInBounds = points.filter(p =>
+            p.latitude >= bounds.minLat && p.latitude <= bounds.maxLat &&
+            p.longitude >= bounds.minLng && p.longitude <= bounds.maxLng
+        );
+
+        console.log(`📍 Puntos en bounding box: ${pointsInBounds.length} de ${points.length}`);
+
+        // Luego verificar precisamente cuáles están dentro del polígono
+        const pointsInDistrict = pointsInBounds.filter(p =>
+            isPointInPolygon(p, districtGeometry)
+        );
+
+        console.log(`✅ Puntos en distrito (preciso): ${pointsInDistrict.length}`);
+
+        if (pointsInDistrict.length === 0) {
+            console.log('⚠️ No hay puntos dentro de este distrito');
+            return {
+                total: 0,
+                avgSignal: 0,
+                avgSpeed: 0,
+                entel: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                tigo: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                viva: { count: 0, avgSignal: 0, avgSpeed: 0 },
+                wifi: 0,
+                fourG: 0,
+                threeG: 0
+            };
+        }
+
+        const stats = {
+            total: pointsInDistrict.length,
+            totalSignal: 0,
+            totalSpeed: 0,
+            entel: { count: 0, totalSignal: 0, totalSpeed: 0 },
+            tigo: { count: 0, totalSignal: 0, totalSpeed: 0 },
+            viva: { count: 0, totalSignal: 0, totalSpeed: 0 },
+            wifi: 0,
+            fourG: 0,
+            threeG: 0
+        };
+
+        pointsInDistrict.forEach(point => {
+            const signal = Math.abs(point.signal || 0); // Valor absoluto para cálculos
+            const speed = point.speed || 0;
+
+            stats.totalSignal += signal;
+            stats.totalSpeed += speed;
+
+            // Por operadora (normalizar nombres)
+            const operator = (point.sim_operator || '').toUpperCase().trim();
+            if (operator.includes('ENTEL')) {
+                stats.entel.count++;
+                stats.entel.totalSignal += signal;
+                stats.entel.totalSpeed += speed;
+            } else if (operator.includes('TIGO')) {
+                stats.tigo.count++;
+                stats.tigo.totalSignal += signal;
+                stats.tigo.totalSpeed += speed;
+            } else if (operator.includes('VIVA')) {
+                stats.viva.count++;
+                stats.viva.totalSignal += signal;
+                stats.viva.totalSpeed += speed;
+            }
+
+            // Por tipo de red
+            const netType = point.network_type;
+            if (netType && netType.includes('WiFi')) stats.wifi++;
+            else if (netType && netType.includes('4G')) stats.fourG++;
+            else if (netType && netType.includes('3G')) stats.threeG++;
+        });
+
+        // Calcular promedios
+        const avgSignal = -(stats.totalSignal / stats.total); // Negativo para dBm
+        const avgSpeed = stats.totalSpeed / stats.total;
+
+        const result = {
+            total: stats.total,
+            avgSignal: avgSignal.toFixed(1),
+            avgSpeed: avgSpeed.toFixed(2),
+            entel: {
+                count: stats.entel.count,
+                avgSignal: stats.entel.count > 0 ? (-(stats.entel.totalSignal / stats.entel.count)).toFixed(1) : 0,
+                avgSpeed: stats.entel.count > 0 ? (stats.entel.totalSpeed / stats.entel.count).toFixed(2) : 0
+            },
+            tigo: {
+                count: stats.tigo.count,
+                avgSignal: stats.tigo.count > 0 ? (-(stats.tigo.totalSignal / stats.tigo.count)).toFixed(1) : 0,
+                avgSpeed: stats.tigo.count > 0 ? (stats.tigo.totalSpeed / stats.tigo.count).toFixed(2) : 0
+            },
+            viva: {
+                count: stats.viva.count,
+                avgSignal: stats.viva.count > 0 ? (-(stats.viva.totalSignal / stats.viva.count)).toFixed(1) : 0,
+                avgSpeed: stats.viva.count > 0 ? (stats.viva.totalSpeed / stats.viva.count).toFixed(2) : 0
+            },
+            wifi: stats.wifi,
+            fourG: stats.fourG,
+            threeG: stats.threeG
+        };
+
+        console.log('📊 Stats calculadas:', result);
+        return result;
+    };
+
     const onEachDistrict = (feature, layer) => {
-        const { distrito, nombreciud, poblacion, viviendas } = feature.properties;
+        const { distrito, nombreciud, shapeName } = feature.properties;
+        const displayName = shapeName || nombreciud || distrito || 'Distrito Desconocido';
+
+        // Calcular estadísticas del distrito
+        const stats = calculateDistrictStats(feature.geometry);
+
+        console.log(`📊 Estadísticas para ${displayName}:`, stats);
 
         layer.bindPopup(`
-            <div style="font-family: sans-serif;">
-                <h3 style="margin: 0 0 8px 0; color: #22c55e; font-size: 14px; font-weight: 600;">
-                    ${nombreciud}
+            <div style="font-family: 'Inter', sans-serif; min-width: 280px;">
+                <h3 style="margin: 0 0 12px 0; color: #22c55e; font-size: 16px; font-weight: 700; border-bottom: 2px solid #22c55e; padding-bottom: 8px;">
+                    📍 ${displayName}
                 </h3>
-                <p style="margin: 4px 0; color: #333; font-size: 12px;">
-                    <strong>Distrito:</strong> ${distrito}
-                </p>
-                <p style="margin: 4px 0; color: #333; font-size: 12px;">
-                    <strong>Población:</strong> ${parseInt(poblacion).toLocaleString()}
-                </p>
-                <p style="margin: 4px 0; color: #333; font-size: 12px;">
-                    <strong>Viviendas:</strong> ${parseInt(viviendas).toLocaleString()}
-                </p>
+                
+                <div style="background: #f8fafc; padding: 8px; border-radius: 6px; margin-bottom: 8px;">
+                    <p style="margin: 4px 0; color: #1e293b; font-size: 13px; font-weight: 600;">
+                        📊 Total de Señales: <span style="color: #22c55e;">${stats.total}</span>
+                    </p>
+                    <p style="margin: 4px 0; color: #1e293b; font-size: 12px;">
+                        📶 Señal Promedio: <span style="color: ${stats.avgSignal >= -70 ? '#22c55e' : stats.avgSignal >= -85 ? '#eab308' : '#ef4444'};">${stats.avgSignal} dBm</span>
+                    </p>
+                    <p style="margin: 4px 0; color: #1e293b; font-size: 12px;">
+                        🚀 Velocidad Promedio: <span style="color: #3b82f6;">${stats.avgSpeed} Mbps</span>
+                    </p>
+                </div>
+                
+                <h4 style="margin: 8px 0 4px 0; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Por Operadora:
+                </h4>
+                <div style="background: #fee2e2; padding: 6px; border-radius: 4px; margin-bottom: 4px;">
+                    <p style="margin: 2px 0; color: #7f1d1d; font-size: 11px; font-weight: 600;">
+                        🔴 ENTEL: ${stats.entel.count} señales
+                    </p>
+                    ${stats.entel.count > 0 ? `
+                    <p style="margin: 2px 0; color: #991b1b; font-size: 10px; padding-left: 16px;">
+                        📶 ${stats.entel.avgSignal} dBm  |  🚀 ${stats.entel.avgSpeed} Mbps
+                    </p>
+                    ` : ''}
+                </div>
+                
+                <div style="background: #dbeafe; padding: 6px; border-radius: 4px; margin-bottom: 4px;">
+                    <p style="margin: 2px 0; color: #1e3a8a; font-size: 11px; font-weight: 600;">
+                        🔵 TIGO: ${stats.tigo.count} señales
+                    </p>
+                    ${stats.tigo.count > 0 ? `
+                    <p style="margin: 2px 0; color: #1e40af; font-size: 10px; padding-left: 16px;">
+                        📶 ${stats.tigo.avgSignal} dBm  |  🚀 ${stats.tigo.avgSpeed} Mbps
+                    </p>
+                    ` : ''}
+                </div>
+                
+                <div style="background: #dcfce7; padding: 6px; border-radius: 4px; margin-bottom: 8px;">
+                    <p style="margin: 2px 0; color: #14532d; font-size: 11px; font-weight: 600;">
+                        🟢 VIVA: ${stats.viva.count} señales
+                    </p>
+                    ${stats.viva.count > 0 ? `
+                    <p style="margin: 2px 0; color: #166534; font-size: 10px; padding-left: 16px;">
+                        📶 ${stats.viva.avgSignal} dBm  |  🚀 ${stats.viva.avgSpeed} Mbps
+                    </p>
+                    ` : ''}
+                </div>
+                
+                <h4 style="margin: 8px 0 4px 0; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+                    Por Tipo de Red:
+                </h4>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span style="background: #e0e7ff; color: #3730a3; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 600;">
+                        WiFi: ${stats.wifi}
+                    </span>
+                    <span style="background: #fef3c7; color: #78350f; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 600;">
+                        4G: ${stats.fourG}
+                    </span>
+                    <span style="background: #fed7aa; color: #7c2d12; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: 600;">
+                        3G: ${stats.threeG}
+                    </span>
+                </div>
             </div>
         `);
 
@@ -380,10 +639,10 @@ export default function MapView({ points = [], selectedFilters, heatmapData = []
                 {selectedFilters?.layer && selectedFilters.layer !== 'none' && (
                     <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ 
-                                width: '20px', 
-                                height: '2px', 
-                                background: selectedFilters.layer === 'municipios' ? '#059669' : '#22c55e' 
+                            <div style={{
+                                width: '20px',
+                                height: '2px',
+                                background: selectedFilters.layer === 'municipios' ? '#059669' : '#22c55e'
                             }}></div>
                             <span style={{ textTransform: 'capitalize' }}>{selectedFilters.layer}</span>
                         </div>

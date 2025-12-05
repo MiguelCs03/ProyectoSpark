@@ -2,7 +2,7 @@
  * StatsCards Component - Tarjetas de estadísticas
  * Muestra métricas agregadas del sistema
  */
-export default function StatsCards({ stats }) {
+export default function StatsCards({ stats, mapPointsCount = 0 }) {
     if (!stats) {
         return (
             <div className="dashboard-grid">
@@ -16,15 +16,15 @@ export default function StatsCards({ stats }) {
 
     return (
         <div className="dashboard-grid">
-            {/* Total de Señales */}
+            {/* Puntos en el mapa */}
             <div className="dashboard-card">
                 <div className="card-header">
                     <span className="card-title">📊 Total Señales</span>
                 </div>
                 <div className="card-value">
-                    {(stats.total_signals || 0).toLocaleString()}
+                    {mapPointsCount.toLocaleString()}
                 </div>
-                <div className="card-subtitle">Registros procesados</div>
+                <div className="card-subtitle">Datos cargados en el mapa</div>
             </div>
 
             {/* Batería Promedio */}

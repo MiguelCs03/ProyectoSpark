@@ -159,6 +159,31 @@ export default function FilterSidebar({
                 </div>
             </div>
 
+            {/* Filtro por Fecha */}
+            <div className="filter-group">
+                <h3>📅 Filtrar por Fecha</h3>
+                <div className="filter-options">
+                    <div className="date-filter">
+                        <label htmlFor="fecha-inicio">Desde:</label>
+                        <input
+                            type="date"
+                            id="fecha-inicio"
+                            className="date-input"
+                            onChange={(e) => onFilterChange({ ...localFilters, dateFrom: e.target.value })}
+                        />
+                    </div>
+                    <div className="date-filter">
+                        <label htmlFor="fecha-fin">Hasta:</label>
+                        <input
+                            type="date"
+                            id="fecha-fin"
+                            className="date-input"
+                            onChange={(e) => onFilterChange({ ...localFilters, dateTo: e.target.value })}
+                        />
+                    </div>
+                </div>
+            </div>
+
             <h3 style={{ marginTop: '20px' }}>Filtros de Datos</h3>
 
             {/* Provincias */}

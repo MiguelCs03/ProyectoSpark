@@ -23,7 +23,7 @@ class ApiService {
             const params = new URLSearchParams();
             params.append('offset', offset);
             params.append('limit', limit);
-            
+
             Object.entries(filters).forEach(([key, value]) => {
                 if (value) params.append(key, value);
             });

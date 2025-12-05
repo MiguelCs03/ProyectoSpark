@@ -34,9 +34,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-  
+
   // Control de carga incremental
   const loadIdRef = useRef(0);
+  const lastOffsetRef = useRef(0); // Tracking del último offset cargado
 
   // Cargar opciones de filtros al iniciar y configurar auto-refresh
   useEffect(() => {
@@ -44,22 +45,23 @@ function App() {
     loadInitialData();
     setupWebSocket();
 
-    // Auto-refresh desactivado para evitar recargas constantes de datos masivos
-    // const refreshInterval = setInterval(() => {
-    //   console.log('🔄 Auto-refreshing data...');
-    //   loadData();
-    // }, 10000);
+    // Auto-refresh cada 10 segundos para cargar más datos incrementalmente
+    const refreshInterval = setInterval(() => {
+      console.log('🔄 Auto-refreshing data...');
+      loadData(true); // true = modo actualización (append)
+    }, 10000);
 
     return () => {
       WebSocketService.disconnect();
-      // clearInterval(refreshInterval);
+      clearInterval(refreshInterval);
     };
   }, []);
 
-  // Recargar datos cuando cambien los filtros
+  // NO recargar datos cuando cambien los filtros - solo refrescar stats
   useEffect(() => {
-    if (!loading) {
-      loadData();
+    if (!loading && selectedFilters) {
+      // Solo recargar estadísticas, NO los puntos del mapa
+      loadStats();
     }
   }, [selectedFilters]);
 
@@ -83,6 +85,26 @@ function App() {
     }
   };
 
+  const loadStats = async () => {
+    try {
+      // Preparar filtros activos
+      const activeFilters = {};
+      Object.entries(selectedFilters).forEach(([key, value]) => {
+        if (value && value.length > 0) {
+          activeFilters[key] = value;
+        }
+      });
+
+      console.log('📊 Recargando solo estadísticas...');
+      const statsResponse = await ApiService.getAggregatedData(activeFilters);
+      if (statsResponse.success) {
+        setStats(statsResponse);
+      }
+    } catch (error) {
+      console.error('Error loading stats:', error);
+    }
+  };
+
   const loadData = async (isUpdate = false) => {
     try {
       // Incrementar ID de carga para invalidar cargas anteriores
@@ -97,9 +119,21 @@ function App() {
       });
 
       // Cargar estadísticas agregadas
+      console.log('🔄 Cargando datos agregados...');
+      console.log('Filtros activos:', activeFilters);
+
       const statsResponse = await ApiService.getAggregatedData(activeFilters);
+      console.log('📊 Respuesta de estadísticas:', statsResponse);
+
       if (statsResponse.success) {
+        console.log('✅ Datos de stats recibidos:', {
+          total_signals: statsResponse.total_signals,
+          signals_by_company: statsResponse.signals_by_company,
+          signal_heatmap: statsResponse.signal_heatmap?.length || 0
+        });
         setStats(statsResponse);
+      } else {
+        console.error('❌ Error: statsResponse.success is false');
       }
 
       // Cargar puntos del mapa
@@ -121,18 +155,20 @@ function App() {
         }
       } else {
         // Carga incremental para todos los datos
-        let offset = 0;
-        
+        let offset = lastOffsetRef.current; // Empezar desde el último offset
+
         if (isUpdate && currentLoadId === loadIdRef.current) {
-          // Si es actualización, empezamos desde el último punto cargado
-          offset = mapPointsRef.current.length;
-          console.log(`Actualizando datos: buscando nuevos registros desde offset ${offset}`);
+          // Si es actualización, continuar desde donde quedamos
+          console.log(`📊 Actualizando datos: continuando desde offset ${offset}`);
         } else if (currentLoadId === loadIdRef.current) {
-          // Si es carga nueva, limpiamos todo
-          setMapPoints([]); 
+          // Si es carga nueva, resetear
+          setMapPoints([]);
+          offset = 0;
+          lastOffsetRef.current = 0;
+          console.log('🔄 Reiniciando carga desde 0');
         }
-        
-        const limit = 25000;
+
+        const limit = 25000; // Cargar 25000 registros por vez
         let hasMore = true;
 
         const loadChunk = async () => {
@@ -140,23 +176,26 @@ function App() {
           if (currentLoadId !== loadIdRef.current) return;
           if (!hasMore) return;
 
-          console.log(`Cargando chunk: offset=${offset}, limit=${limit}`);
+          console.log(`📦 Cargando chunk: offset=${offset}, limit=${limit}`);
           const response = await ApiService.getSignals({}, offset, limit);
-          
+
           // Verificar nuevamente después del await
           if (currentLoadId !== loadIdRef.current) return;
 
           if (response.success && response.data.length > 0) {
             setMapPoints(prev => [...prev, ...response.data]);
-            offset += limit;
-            
+            offset += response.data.length; // Usar la cantidad real recibida
+            lastOffsetRef.current = offset; // Guardar el offset actual
+
+            console.log(`✅ Cargados ${response.data.length} registros. Total acumulado: ${offset}`);
+
             // Si recibimos menos del límite, es el último chunk
             if (response.data.length < limit) {
               hasMore = false;
-              console.log('Carga completa finalizada');
+              console.log('✅ Carga completa finalizada');
             } else {
-              // Programar siguiente chunk en 5 segundos
-              setTimeout(loadChunk, 5000);
+              // Programar siguiente chunk en 2 segundos
+              setTimeout(loadChunk, 2000);
             }
           } else {
             hasMore = false;
@@ -283,7 +322,7 @@ function App() {
         {/* Contenido principal */}
         <main className="main-content">
           {/* Tarjetas de estadísticas */}
-          <StatsCards stats={stats} />
+          <StatsCards stats={stats} mapPointsCount={mapPoints.length} />
 
           {/* Mapa */}
           <div className="mt-2">

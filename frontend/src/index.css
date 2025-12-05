@@ -251,6 +251,42 @@ body {
   box-shadow: var(--shadow-glow);
 }
 
+/* Date Filters */
+.date-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+}
+
+.date-filter label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.date-input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-dark);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: var(--primary-green);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+.date-input:hover {
+  border-color: var(--primary-green-dark);
+}
+
+
 /* ============================================
    MAIN CONTENT - Dashboard premium
    ============================================ */

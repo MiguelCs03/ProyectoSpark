@@ -19,9 +19,16 @@ class SupabaseService:
         )
         self.table_name = "locations"  # Tabla de ubicaciones/señales
     
-    def get_all_signals(self, limit: int = 300000, offset: int = 0) -> List[Dict[str, Any]]:
+    def get_all_signals(self, limit: int = 25000, offset: int = 0) -> List[Dict[str, Any]]:
         """Obtiene TODAS las señales con límite y offset configurables."""
         try:
+            # Limitar máximo a 25000 para evitar timeout
+            if limit > 25000:
+                limit = 25000
+                
+            print(f"🔍 [DEBUG] Fetching signals from Supabase table '{self.table_name}'")
+            print(f"🔍 [DEBUG] Range: {offset} to {offset + limit - 1}")
+            
             # Optimización: Seleccionar solo columnas necesarias y usar range para paginación
             # Supabase range es inclusivo [start, end]
             start = offset
@@ -32,9 +39,14 @@ class SupabaseService:
                 .range(start, end)\
                 .execute()
             
+            print(f"✅ [DEBUG] Fetched {len(response.data)} signals from database")
             logger.info(f"Fetched {len(response.data)} signals from database (range={start}-{end})")
             return self._normalize_data(response.data)
         except Exception as e:
+            print(f"❌ [ERROR] Error fetching signals: {e}")
+            print(f"❌ [ERROR] Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             logger.error(f"Error fetching signals: {e}")
             return []
     
